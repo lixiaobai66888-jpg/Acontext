@@ -268,7 +268,11 @@ acontext create my-proj --template-path "typescript/openai-basic"
 
 
 
-Check our example repo for more templates: [Acontext-Examples](https://github.com/memodb-io/Acontext-Examples).
+> [!NOTE]
+>
+> Check our example repo for more templates: [Acontext-Examples](https://github.com/memodb-io/Acontext-Examples).
+>
+> We're cooking more full-stack Agent Applications! [Tell us what you want](#🤝 Stay Together)
 
 
 
