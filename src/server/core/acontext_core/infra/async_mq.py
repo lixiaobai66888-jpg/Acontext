@@ -11,6 +11,7 @@ from typing import Callable, Awaitable, Any, Dict, Optional, List, Set, Tuple
 from time import perf_counter
 
 from aio_pika import connect_robust, ExchangeType, Message
+from aio_pika.exceptions import ChannelInvalidStateError
 from aio_pika.abc import AbstractConnection, AbstractChannel, AbstractQueue
 
 from ..env import LOG, DEFAULT_CORE_CONFIG
@@ -18,21 +19,10 @@ from ..telemetry.log import bound_logging_vars
 from ..util.handler_spec import check_handler_function_sanity, get_handler_body_type
 
 # Optional OpenTelemetry imports - only used when tracing is enabled
-try:
-    from opentelemetry import trace, propagate, context as otel_context
-    from opentelemetry.trace import Status, StatusCode
-    OTEL_AVAILABLE = True
-except ImportError:
-    OTEL_AVAILABLE = False
-    # Create dummy objects to avoid errors
-    trace = None
-    propagate = None
-    otel_context = None
-    # Create a simple enum-like class for StatusCode when OTEL is not available
-    class StatusCode:
-        OK = "OK"
-        ERROR = "ERROR"
-    Status = lambda code, desc=None: None  # Dummy Status function
+from opentelemetry import trace, propagate, context as otel_context
+from opentelemetry.trace import Status, StatusCode
+
+OTEL_AVAILABLE = True
 
 
 class SpecialHandler(StrEnum):
@@ -46,6 +36,7 @@ def _is_otel_enabled() -> bool:
     """Check if OpenTelemetry tracing is enabled"""
     try:
         from ..telemetry.config import TelemetryConfig
+
         config = TelemetryConfig.from_env()
         return config.enabled
     except Exception:
@@ -56,28 +47,30 @@ def _is_otel_enabled() -> bool:
 def _extract_trace_context_from_headers(message: Message) -> Optional[Any]:
     """
     Extract trace context from message headers for trace propagation.
-    
+
     Returns:
         Extracted trace context or None if extraction fails
     """
     if not _is_otel_enabled() or not message.headers or not OTEL_AVAILABLE:
         return None
-    
+
     try:
         # Convert headers to string dict for propagation
         headers = {}
         for k, v in message.headers.items():
             # aio_pika headers values can be various types
             if isinstance(v, (str, bytes)):
-                headers[k] = v if isinstance(v, str) else v.decode('utf-8', errors='ignore')
+                headers[k] = (
+                    v if isinstance(v, str) else v.decode("utf-8", errors="ignore")
+                )
             else:
                 headers[k] = str(v)
-        
+
         if headers:
             return propagate.extract(headers)
     except Exception:
         pass  # If extraction fails, return None
-    
+
     return None
 
 
@@ -88,13 +81,13 @@ def _create_consume_span(
 ) -> Tuple[Optional[Any], Optional[Any]]:
     """
     Create a span for message consumption.
-    
+
     Returns:
         Tuple of (span, context) or (None, None) if tracing is disabled
     """
     if not _is_otel_enabled() or not OTEL_AVAILABLE:
         return None, None
-    
+
     try:
         tracer = trace.get_tracer(__name__)
         span_context = extracted_context if extracted_context else None
@@ -108,7 +101,7 @@ def _create_consume_span(
         consume_span.set_attribute("messaging.destination_kind", "queue")
         consume_span.set_attribute("messaging.rabbitmq.exchange", config.exchange_name)
         consume_span.set_attribute("messaging.rabbitmq.routing_key", config.routing_key)
-        
+
         consume_context = trace.set_span_in_context(consume_span)
         return consume_span, consume_context
     except Exception:
@@ -122,18 +115,18 @@ def _create_process_span(
 ) -> Tuple[Optional[Any], Optional[Any]]:
     """
     Create a span for message processing.
-    
+
     Returns:
         Tuple of (span, context) or (None, None) if tracing is disabled
     """
     if not _is_otel_enabled() or not OTEL_AVAILABLE:
         return None, None
-    
+
     try:
         message_id = getattr(message, "message_id", None)
         if message_id:
             message_id = str(message_id)
-        
+
         tracer = trace.get_tracer(__name__)
         span = tracer.start_span(
             "mq.process",
@@ -145,7 +138,7 @@ def _create_process_span(
         span.set_attribute("messaging.destination_kind", "queue")
         if message_id:
             span.set_attribute("messaging.message_id", message_id)
-        
+
         process_context = trace.set_span_in_context(span)
         return span, process_context
     except Exception:
@@ -159,32 +152,36 @@ def _create_publish_span_and_headers(
 ) -> Tuple[Optional[Any], Dict[str, Any]]:
     """
     Create a span for message publishing and inject trace context into headers.
-    
+
     Returns:
         Tuple of (span, headers_dict)
     """
     headers = {}
     span = None
-    
+
     if not _is_otel_enabled() or not OTEL_AVAILABLE:
         return None, headers
-    
+
     try:
         from ..telemetry.otel import create_mq_publish_span
-        
+
         span = create_mq_publish_span(exchange_name, routing_key)
-        span.set_attribute("messaging.message_payload_size_bytes", len(body.encode("utf-8")))
-        
+        span.set_attribute(
+            "messaging.message_payload_size_bytes", len(body.encode("utf-8"))
+        )
+
         # Inject trace context into message headers for trace propagation
         ctx = trace.set_span_in_context(span)
         propagate.inject(headers, context=ctx)
     except Exception:
         pass  # If tracing fails, continue without it
-    
+
     return span, headers
 
 
-def _set_span_status(span: Optional[Any], status_code: Any, description: Optional[str] = None) -> None:
+def _set_span_status(
+    span: Optional[Any], status_code: Any, description: Optional[str] = None
+) -> None:
     """Set status on a span if it exists"""
     if span and OTEL_AVAILABLE:
         try:
@@ -297,7 +294,7 @@ class AsyncSingleThreadMQConsumer:
             # Double-check after acquiring lock
             if self.connection and not self.connection.is_closed:
                 return
-            
+
             try:
                 self.connection = await connect_robust(
                     self.connection_config.url,
@@ -348,7 +345,7 @@ class AsyncSingleThreadMQConsumer:
         """Process a single message with retry logic"""
         # Create span for message processing if OpenTelemetry is enabled
         span, process_context = _create_process_span(config, message, parent_context)
-        
+
         try:
             async with message.process(requeue=False, ignore_processed=True):
                 retry_count = 0
@@ -390,12 +387,14 @@ class AsyncSingleThreadMQConsumer:
                                         timeout=config.timeout,
                                     )
                                     _end_s = perf_counter()
-                                
+
                                 LOG.debug(
                                     f"Queue: {config.queue_name} processed in {_end_s - _start_s:.4f}s"
                                 )
                                 if span:
-                                    span.set_attribute("mq.processing_time_seconds", _end_s - _start_s)
+                                    span.set_attribute(
+                                        "mq.processing_time_seconds", _end_s - _start_s
+                                    )
                         except ValidationError as e:
                             LOG.error(
                                 f"Message validation failed - queue: {config.queue_name}, "
@@ -403,7 +402,9 @@ class AsyncSingleThreadMQConsumer:
                             )
                             if span:
                                 _record_span_exception(span, e)
-                                _set_span_status(span, StatusCode.ERROR, "Validation failed")
+                                _set_span_status(
+                                    span, StatusCode.ERROR, "Validation failed"
+                                )
                             await message.reject(requeue=False)
                             return
                         except asyncio.TimeoutError:
@@ -412,9 +413,11 @@ class AsyncSingleThreadMQConsumer:
                             )
                             if span:
                                 _record_span_exception(span, timeout_error)
-                                _set_span_status(span, StatusCode.ERROR, "Handler timeout")
+                                _set_span_status(
+                                    span, StatusCode.ERROR, "Handler timeout"
+                                )
                             raise timeout_error
-                        
+
                         # Success
                         if span:
                             _set_span_status(span, StatusCode.OK)
@@ -460,8 +463,10 @@ class AsyncSingleThreadMQConsumer:
             task.result()
         except asyncio.CancelledError:
             pass
+        except ChannelInvalidStateError as e:
+            LOG.warning(f"Message channel invalid: {e}")
         except Exception as e:
-            LOG.error(f"Message task unknown error: {e}")
+            LOG.error(f"Message task unknown error: {e}, {traceback.format_exc()}")
         finally:
             self._processing_tasks.discard(task)
             LOG.debug(f"#Current Processing Tasks: {len(self._processing_tasks)}")
@@ -512,20 +517,24 @@ class AsyncSingleThreadMQConsumer:
                         # Process message in background task for concurrency
                         async def process_with_tracing():
                             # Extract trace context from message headers if available
-                            extracted_context = _extract_trace_context_from_headers(message)
-                            
+                            extracted_context = _extract_trace_context_from_headers(
+                                message
+                            )
+
                             # Create span for message consumption if OpenTelemetry is enabled
                             consume_span, consume_context = _create_consume_span(
                                 config, message, extracted_context
                             )
-                            
+
                             try:
                                 # Pass consume_context to process_message so it can create child spans
-                                return await self._process_message(config, message, consume_context)
+                                return await self._process_message(
+                                    config, message, consume_context
+                                )
                             finally:
                                 if consume_span:
                                     consume_span.end()
-                        
+
                         task = asyncio.create_task(process_with_tracing())
                         self._processing_tasks.add(task)
                         task.add_done_callback(self.cleanup_message_task)
@@ -623,12 +632,12 @@ class AsyncSingleThreadMQConsumer:
         """Force a full reconnection, safely closing old connection if possible"""
         async with self._connection_lock:
             LOG.warning("Forcing full MQ reconnection...")
-            
+
             # Try to close the old connection gracefully
             old_connection = self.connection
             self._publish_channle = None
             self.connection = None
-            
+
             if old_connection:
                 try:
                     if not old_connection.is_closed:
@@ -636,7 +645,7 @@ class AsyncSingleThreadMQConsumer:
                 except Exception as e:
                     # Ignore errors when closing a broken connection
                     LOG.debug(f"Error closing old connection (ignored): {e}")
-            
+
             # Now reconnect - connect() will acquire the lock again, but that's okay
             # since we're releasing it here. Actually, let's just do the connection inline.
             try:
@@ -662,7 +671,7 @@ class AsyncSingleThreadMQConsumer:
             self._publish_channle = None
             await self.connect()
             return
-        
+
         # Connection is open, check the channel
         if self._publish_channle is None or self._publish_channle.is_closed:
             LOG.debug("Creating new publish channel...")
@@ -681,22 +690,26 @@ class AsyncSingleThreadMQConsumer:
     async def publish(self, exchange_name: str, routing_key: str, body: str) -> None:
         """Publish a message to an exchange without declaring it"""
         assert len(exchange_name) and len(routing_key)
-        
+
         # Create span for message publishing and inject trace context into headers
-        span, headers = _create_publish_span_and_headers(exchange_name, routing_key, body)
-        
+        span, headers = _create_publish_span_and_headers(
+            exchange_name, routing_key, body
+        )
+
         max_retries = 3
         retry_delay = 1.0
         last_exception = None
-        
+
         try:
             for attempt in range(max_retries):
                 try:
                     await self._ensure_publish_channel()
-                    
+
                     if self._publish_channle is None:
-                        raise RuntimeError("No active MQ Publish Channel after reconnection")
-                    
+                        raise RuntimeError(
+                            "No active MQ Publish Channel after reconnection"
+                        )
+
                     # Create the message with trace context in headers
                     message = Message(
                         body.encode("utf-8"),
@@ -711,19 +724,18 @@ class AsyncSingleThreadMQConsumer:
                     LOG.debug(
                         f"Published message to exchange: {exchange_name}, routing_key: {routing_key}"
                     )
-                    
+
                     if span:
                         _set_span_status(span, StatusCode.OK)
                     return  # Success, exit the retry loop
-                    
+
                 except Exception as e:
                     last_exception = e
                     # Check if it's a connection-related error that we should retry
-                    is_connection_error = (
-                        "closed" in str(e).lower() or 
-                        isinstance(e, (ConnectionError, RuntimeError))
+                    is_connection_error = "closed" in str(e).lower() or isinstance(
+                        e, (ConnectionError, RuntimeError)
                     )
-                    
+
                     if is_connection_error and attempt < max_retries - 1:
                         wait_time = retry_delay * (attempt + 1)
                         LOG.warning(
@@ -739,7 +751,7 @@ class AsyncSingleThreadMQConsumer:
                             _record_span_exception(span, e)
                             _set_span_status(span, StatusCode.ERROR, str(e))
                         raise
-            
+
             # If we get here, we've exhausted all retries (shouldn't happen due to raise above)
             if last_exception:
                 if span:
@@ -838,26 +850,28 @@ class AsyncSingleThreadMQConsumer:
         return True
 
 
-# Decorator for easy handler registration
-def register_consumer(
-    mq_client: AsyncSingleThreadMQConsumer, config: ConsumerConfigData
-):
-    """Decorator to register a function as a message handler"""
-
-    def decorator(func: Callable[[dict, Message], Awaitable[Any]] | SpecialHandler):
-        _consumer_config = ConsumerConfig(**config.__dict__, handler=func)
-        mq_client.register_consumer(_consumer_config)
-        return func
-
-    return decorator
-
-
 MQ_CLIENT = AsyncSingleThreadMQConsumer(
     ConnectionConfig(
         url=DEFAULT_CORE_CONFIG.mq_url,
         connection_name=DEFAULT_CORE_CONFIG.mq_connection_name,
     )
 )
+
+
+# Decorator for easy handler registration
+def register_consumer(config: ConsumerConfigData):
+    """Decorator to register a function as a message handler"""
+
+    def decorator(func: Callable[[dict, Message], Awaitable[Any]] | SpecialHandler):
+        _consumer_config = ConsumerConfig(**config.__dict__, handler=func)
+        MQ_CLIENT.register_consumer(_consumer_config)
+        return func
+
+    return decorator
+
+
+async def publish_mq(exchange_name: str, routing_key: str, body: str) -> None:
+    await MQ_CLIENT.publish(exchange_name, routing_key, body)
 
 
 async def init_mq() -> None:
@@ -867,6 +881,10 @@ async def init_mq() -> None:
     else:
         LOG.error("Failed to initialize MQ connection")
         raise ConnectionError("Could not connect to MQ")
+
+
+async def start_mq() -> None:
+    await MQ_CLIENT.start()
 
 
 async def close_mq() -> None:
