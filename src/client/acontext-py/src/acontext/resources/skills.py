@@ -12,8 +12,6 @@ from ..types.skill import (
     GetSkillFileResp,
     ListSkillsOutput,
     Skill,
-    SkillCatalogItem,
-    _ListSkillsResponse,
 )
 from ..uploads import FileUpload, normalize_file_upload
 
@@ -25,9 +23,11 @@ class SkillsAPI:
     def create(
         self,
         *,
-        file: FileUpload
-        | tuple[str, BinaryIO | bytes]
-        | tuple[str, BinaryIO | bytes, str],
+        file: (
+            FileUpload
+            | tuple[str, BinaryIO | bytes]
+            | tuple[str, BinaryIO | bytes, str]
+        ),
         user: str | None = None,
         meta: Mapping[str, Any] | None = None,
     ) -> Skill:
@@ -80,31 +80,23 @@ class SkillsAPI:
             along with pagination information (next_cursor and has_more).
         """
         effective_limit = limit if limit is not None else 100
-        params = build_params(user=user, limit=effective_limit, cursor=cursor, time_desc=time_desc)
-        data = self._requester.request("GET", "/agent_skills", params=params or None)
-        api_response = _ListSkillsResponse.model_validate(data)
-
-        # Convert to catalog format (name and description only)
-        return ListSkillsOutput(
-            items=[
-                SkillCatalogItem(name=skill.name, description=skill.description)
-                for skill in api_response.items
-            ],
-            next_cursor=api_response.next_cursor,
-            has_more=api_response.has_more,
+        params = build_params(
+            user=user, limit=effective_limit, cursor=cursor, time_desc=time_desc
         )
+        data = self._requester.request("GET", "/agent_skills", params=params or None)
+        # Pydantic ignores extra fields, so ListSkillsOutput directly extracts name/description
+        return ListSkillsOutput.model_validate(data)
 
-    def get_by_name(self, name: str) -> Skill:
-        """Get a skill by its name.
+    def get(self, skill_id: str) -> Skill:
+        """Get a skill by its ID.
 
         Args:
-            name: The name of the skill (unique within project).
+            skill_id: The UUID of the skill.
 
         Returns:
-            Skill containing the skill information.
+            Skill containing the full skill information including file_index.
         """
-        params = {"name": name}
-        data = self._requester.request("GET", "/agent_skills/by_name", params=params)
+        data = self._requester.request("GET", f"/agent_skills/{skill_id}")
         return Skill.model_validate(data)
 
     def delete(self, skill_id: str) -> None:
@@ -115,32 +107,31 @@ class SkillsAPI:
         """
         self._requester.request("DELETE", f"/agent_skills/{skill_id}")
 
-    def get_file_by_name(
+    def get_file(
         self,
         *,
-        skill_name: str,
+        skill_id: str,
         file_path: str,
         expire: int | None = None,
     ) -> GetSkillFileResp:
-        """Get a file from a skill by name.
+        """Get a file from a skill by skill ID.
 
         The backend automatically returns content for parseable text files, or a presigned URL
         for non-parseable files (binary, images, etc.).
 
         Args:
-            skill_name: The name of the skill.
+            skill_id: The UUID of the skill.
             file_path: Relative path to the file within the skill (e.g., 'scripts/extract_text.json').
             expire: URL expiration time in seconds. Defaults to 900 (15 minutes).
 
         Returns:
             GetSkillFileResp containing the file path, MIME type, and either content or URL.
         """
-        endpoint = f"/agent_skills/by_name/{skill_name}/file"
+        endpoint = f"/agent_skills/{skill_id}/file"
 
-        params = {"file_path": file_path}
+        params: dict[str, Any] = {"file_path": file_path}
         if expire is not None:
             params["expire"] = expire
 
         data = self._requester.request("GET", endpoint, params=params)
         return GetSkillFileResp.model_validate(data)
-

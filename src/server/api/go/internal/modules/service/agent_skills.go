@@ -26,12 +26,9 @@ import (
 type AgentSkillsService interface {
 	Create(ctx context.Context, in CreateAgentSkillsInput) (*model.AgentSkills, error)
 	GetByID(ctx context.Context, projectID uuid.UUID, id uuid.UUID) (*model.AgentSkills, error)
-	GetByName(ctx context.Context, projectID uuid.UUID, name string) (*model.AgentSkills, error)
-	Update(ctx context.Context, in UpdateAgentSkillsInput) (*model.AgentSkills, error)
 	Delete(ctx context.Context, projectID uuid.UUID, id uuid.UUID) error
 	List(ctx context.Context, in ListAgentSkillsInput) (*ListAgentSkillsOutput, error)
-	GetPresignedURL(ctx context.Context, agentSkills *model.AgentSkills, filePath string, expire time.Duration) (string, error)
-	GetFile(ctx context.Context, projectID uuid.UUID, skillName string, filePath string, expire time.Duration) (*GetFileOutput, error)
+	GetFile(ctx context.Context, agentSkills *model.AgentSkills, filePath string, expire time.Duration) (*GetFileOutput, error)
 }
 
 type agentSkillsService struct {
@@ -171,15 +168,6 @@ func (s *agentSkillsService) Create(ctx context.Context, in CreateAgentSkillsInp
 	}
 	if skillDescription == "" {
 		return nil, errors.New("description is required in SKILL.md")
-	}
-
-	// Check if name already exists in project, if so, delete the existing one (override)
-	existing, err := s.r.GetByName(ctx, in.ProjectID, skillName)
-	if err == nil && existing != nil {
-		// Delete existing agent_skills (this will also delete S3 files)
-		if err := s.Delete(ctx, in.ProjectID, existing.ID); err != nil {
-			return nil, fmt.Errorf("delete existing agent_skills: %w", err)
-		}
 	}
 
 	// Generate temporary UUID for S3 key (will be used as DB ID later)
@@ -357,52 +345,6 @@ func (s *agentSkillsService) GetByID(ctx context.Context, projectID uuid.UUID, i
 	return s.r.GetByID(ctx, projectID, id)
 }
 
-func (s *agentSkillsService) GetByName(ctx context.Context, projectID uuid.UUID, name string) (*model.AgentSkills, error) {
-	return s.r.GetByName(ctx, projectID, name)
-}
-
-type UpdateAgentSkillsInput struct {
-	ProjectID   uuid.UUID
-	ID          uuid.UUID
-	Name        *string
-	Description *string
-	Meta        map[string]interface{}
-}
-
-func (s *agentSkillsService) Update(ctx context.Context, in UpdateAgentSkillsInput) (*model.AgentSkills, error) {
-	// Get existing record
-	agentSkills, err := s.r.GetByID(ctx, in.ProjectID, in.ID)
-	if err != nil {
-		return nil, err
-	}
-
-	// Update fields if provided
-	if in.Name != nil {
-		// Check if new name conflicts with existing name
-		if *in.Name != agentSkills.Name {
-			existing, err := s.r.GetByName(ctx, in.ProjectID, *in.Name)
-			if err == nil && existing != nil && existing.ID != in.ID {
-				return nil, fmt.Errorf("agent_skills with name '%s' already exists in project", *in.Name)
-			}
-		}
-		agentSkills.Name = *in.Name
-	}
-
-	if in.Description != nil {
-		agentSkills.Description = *in.Description
-	}
-
-	if in.Meta != nil {
-		agentSkills.Meta = in.Meta
-	}
-
-	if err := s.r.Update(ctx, agentSkills); err != nil {
-		return nil, fmt.Errorf("update agent_skills: %w", err)
-	}
-
-	return agentSkills, nil
-}
-
 func (s *agentSkillsService) Delete(ctx context.Context, projectID uuid.UUID, id uuid.UUID) error {
 	return s.r.Delete(ctx, projectID, id)
 }
@@ -415,10 +357,22 @@ type ListAgentSkillsInput struct {
 	TimeDesc  bool
 }
 
+// AgentSkillsListItem is a lightweight representation of AgentSkills for list responses.
+// It excludes file_index to reduce response payload size.
+type AgentSkillsListItem struct {
+	ID          uuid.UUID              `json:"id"`
+	UserID      *uuid.UUID             `json:"user_id"`
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	Meta        map[string]interface{} `json:"meta"`
+	CreatedAt   time.Time              `json:"created_at"`
+	UpdatedAt   time.Time              `json:"updated_at"`
+}
+
 type ListAgentSkillsOutput struct {
-	Items      []*model.AgentSkills `json:"items"`
-	NextCursor string               `json:"next_cursor,omitempty"`
-	HasMore    bool                 `json:"has_more"`
+	Items      []*AgentSkillsListItem `json:"items"`
+	NextCursor string                 `json:"next_cursor,omitempty"`
+	HasMore    bool                   `json:"has_more"`
 }
 
 func (s *agentSkillsService) List(ctx context.Context, in ListAgentSkillsInput) (*ListAgentSkillsOutput, error) {
@@ -439,43 +393,40 @@ func (s *agentSkillsService) List(ctx context.Context, in ListAgentSkillsInput) 
 		return nil, err
 	}
 
-	out := &ListAgentSkillsOutput{
-		Items:   agentSkills,
-		HasMore: false,
+	// Determine pagination
+	hasMore := len(agentSkills) > in.Limit
+	if hasMore {
+		agentSkills = agentSkills[:in.Limit]
 	}
-	if len(agentSkills) > in.Limit {
-		out.HasMore = true
-		out.Items = agentSkills[:in.Limit]
-		last := out.Items[len(out.Items)-1]
+
+	// Convert to lightweight list items (excludes file_index)
+	items := make([]*AgentSkillsListItem, len(agentSkills))
+	for i, skill := range agentSkills {
+		items[i] = &AgentSkillsListItem{
+			ID:          skill.ID,
+			UserID:      skill.UserID,
+			Name:        skill.Name,
+			Description: skill.Description,
+			Meta:        skill.Meta,
+			CreatedAt:   skill.CreatedAt,
+			UpdatedAt:   skill.UpdatedAt,
+		}
+	}
+
+	out := &ListAgentSkillsOutput{
+		Items:   items,
+		HasMore: hasMore,
+	}
+	if hasMore && len(items) > 0 {
+		last := agentSkills[len(agentSkills)-1]
 		out.NextCursor = paging.EncodeCursor(last.CreatedAt, last.ID)
 	}
 
 	return out, nil
 }
 
-func (s *agentSkillsService) GetPresignedURL(ctx context.Context, agentSkills *model.AgentSkills, filePath string, expire time.Duration) (string, error) {
-	if agentSkills == nil {
-		return "", errors.New("agent_skills is nil")
-	}
-
-	// Find file in file index
-	fileIndex := agentSkills.FileIndex.Data()
-	var found bool
-	for _, fileInfo := range fileIndex {
-		if fileInfo.Path == filePath {
-			found = true
-			break
-		}
-	}
-	if !found {
-		return "", fmt.Errorf("file path '%s' not found in agent_skills", filePath)
-	}
-
-	// Get full S3 key by combining base AssetMeta S3Key with relative path
-	fullS3Key := agentSkills.GetFileS3Key(filePath)
-	return s.s3.PresignGet(ctx, fullS3Key, expire)
-}
-
+// GetFileOutput represents the response for getting a file from a skill.
+// It contains either parsed content (for text files) or a presigned URL (for binary files).
 type GetFileOutput struct {
 	Path    string                  `json:"path"`
 	MIME    string                  `json:"mime"`
@@ -483,11 +434,9 @@ type GetFileOutput struct {
 	URL     *string                 `json:"url,omitempty"`     // Present if file is not text-based or not parseable
 }
 
-func (s *agentSkillsService) GetFile(ctx context.Context, projectID uuid.UUID, skillName string, filePath string, expire time.Duration) (*GetFileOutput, error) {
-	// Get agent skills by name
-	agentSkills, err := s.r.GetByName(ctx, projectID, skillName)
-	if err != nil {
-		return nil, fmt.Errorf("get agent_skills by name: %w", err)
+func (s *agentSkillsService) GetFile(ctx context.Context, agentSkills *model.AgentSkills, filePath string, expire time.Duration) (*GetFileOutput, error) {
+	if agentSkills == nil {
+		return nil, errors.New("agent_skills is nil")
 	}
 
 	// Find file in file index
