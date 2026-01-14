@@ -2,12 +2,19 @@ from dataclasses import dataclass
 
 from .base import BaseContext, BaseTool, BaseToolPool
 from ..client import AcontextClient
+from ..async_client import AcontextAsyncClient
 from ..uploads import FileUpload
 
 
 @dataclass
 class DiskContext(BaseContext):
     client: AcontextClient
+    disk_id: str
+
+
+@dataclass
+class AsyncDiskContext(BaseContext):
+    client: AcontextAsyncClient
     disk_id: str
 
 
@@ -73,6 +80,26 @@ class WriteFileTool(BaseTool):
         )
         return f"File '{artifact.filename}' written successfully to '{artifact.path}'"
 
+    async def async_execute(self, ctx: AsyncDiskContext, llm_arguments: dict) -> str:
+        """Write text content to a file (async)."""
+        filename = llm_arguments.get("filename")
+        content = llm_arguments.get("content")
+        file_path = llm_arguments.get("file_path")
+
+        if not filename:
+            raise ValueError("filename is required")
+        if not content:
+            raise ValueError("content is required")
+
+        normalized_path = _normalize_path(file_path)
+        payload = FileUpload(filename=filename, content=content.encode("utf-8"))
+        artifact = await ctx.client.disks.artifacts.upsert(
+            ctx.disk_id,
+            file=payload,
+            file_path=normalized_path,
+        )
+        return f"File '{artifact.filename}' written successfully to '{artifact.path}'"
+
 
 class ReadFileTool(BaseTool):
     """Tool for reading a text file from the Acontext disk."""
@@ -122,6 +149,34 @@ class ReadFileTool(BaseTool):
 
         normalized_path = _normalize_path(file_path)
         result = ctx.client.disks.artifacts.get(
+            ctx.disk_id,
+            file_path=normalized_path,
+            filename=filename,
+            with_content=True,
+        )
+
+        if not result.content:
+            raise RuntimeError("Failed to read file: server did not return content.")
+
+        content_str = result.content.raw
+        lines = content_str.split("\n")
+        line_start = min(line_offset, len(lines) - 1)
+        line_end = min(line_start + line_limit, len(lines))
+        preview = "\n".join(lines[line_start:line_end])
+        return f"[{normalized_path}{filename} - showing L{line_start}-{line_end} of {len(lines)} lines]\n{preview}"
+
+    async def async_execute(self, ctx: AsyncDiskContext, llm_arguments: dict) -> str:
+        """Read a text file and return its content preview (async)."""
+        filename = llm_arguments.get("filename")
+        file_path = llm_arguments.get("file_path")
+        line_offset = llm_arguments.get("line_offset", 0)
+        line_limit = llm_arguments.get("line_limit", 100)
+
+        if not filename:
+            raise ValueError("filename is required")
+
+        normalized_path = _normalize_path(file_path)
+        result = await ctx.client.disks.artifacts.get(
             ctx.disk_id,
             file_path=normalized_path,
             filename=filename,
@@ -221,6 +276,52 @@ class ReplaceStringTool(BaseTool):
 
         return f"Found {replacement_count} old_string in {normalized_path}{filename} and replaced it."
 
+    async def async_execute(self, ctx: AsyncDiskContext, llm_arguments: dict) -> str:
+        """Replace an old string with a new string in a file (async)."""
+        filename = llm_arguments.get("filename")
+        file_path = llm_arguments.get("file_path")
+        old_string = llm_arguments.get("old_string")
+        new_string = llm_arguments.get("new_string")
+
+        if not filename:
+            raise ValueError("filename is required")
+        if old_string is None:
+            raise ValueError("old_string is required")
+        if new_string is None:
+            raise ValueError("new_string is required")
+
+        normalized_path = _normalize_path(file_path)
+
+        # Read the file content
+        result = await ctx.client.disks.artifacts.get(
+            ctx.disk_id,
+            file_path=normalized_path,
+            filename=filename,
+            with_content=True,
+        )
+
+        if not result.content:
+            raise RuntimeError("Failed to read file: server did not return content.")
+
+        content_str = result.content.raw
+
+        # Perform the replacement
+        if old_string not in content_str:
+            return f"String '{old_string}' not found in file '{filename}'"
+
+        updated_content = content_str.replace(old_string, new_string)
+        replacement_count = content_str.count(old_string)
+
+        # Write the updated content back
+        payload = FileUpload(filename=filename, content=updated_content.encode("utf-8"))
+        await ctx.client.disks.artifacts.upsert(
+            ctx.disk_id,
+            file=payload,
+            file_path=normalized_path,
+        )
+
+        return f"Found {replacement_count} old_string in {normalized_path}{filename} and replaced it."
+
 
 class ListTool(BaseTool):
     """Tool for listing files in a directory on the Acontext disk."""
@@ -252,6 +353,31 @@ class ListTool(BaseTool):
         normalized_path = _normalize_path(file_path)
 
         result = ctx.client.disks.artifacts.list(
+            ctx.disk_id,
+            path=normalized_path,
+        )
+
+        artifacts_list = [artifact.filename for artifact in result.artifacts]
+
+        if not artifacts_list and not result.directories:
+            return f"No files or directories found in '{normalized_path}'"
+
+        file_sect = "\n".join(artifacts_list) or "[NO FILE]"
+        dir_sect = (
+            "\n".join([d.rstrip("/") + "/" for d in result.directories]) or "[NO DIR]"
+        )
+        return f"""[Listing in {normalized_path}]
+Directories:
+{dir_sect}
+Files:
+{file_sect}"""
+
+    async def async_execute(self, ctx: AsyncDiskContext, llm_arguments: dict) -> str:
+        """List all files in a specified path (async)."""
+        file_path = llm_arguments.get("file_path")
+        normalized_path = _normalize_path(file_path)
+
+        result = await ctx.client.disks.artifacts.list(
             ctx.disk_id,
             path=normalized_path,
         )
@@ -327,6 +453,29 @@ class DownloadFileTool(BaseTool):
 
         return f"Public download URL for '{normalized_path}{filename}' (expires in {expire}s):\n{result.public_url}"
 
+    async def async_execute(self, ctx: AsyncDiskContext, llm_arguments: dict) -> str:
+        """Get a public download URL for a file (async)."""
+        filename = llm_arguments.get("filename")
+        file_path = llm_arguments.get("file_path")
+        expire = llm_arguments.get("expire", 3600)
+
+        if not filename:
+            raise ValueError("filename is required")
+
+        normalized_path = _normalize_path(file_path)
+        result = await ctx.client.disks.artifacts.get(
+            ctx.disk_id,
+            file_path=normalized_path,
+            filename=filename,
+            with_public_url=True,
+            expire=expire,
+        )
+
+        if not result.public_url:
+            raise RuntimeError("Failed to get public URL: server did not return a URL.")
+
+        return f"Public download URL for '{normalized_path}{filename}' (expires in {expire}s):\n{result.public_url}"
+
 
 class GrepArtifactsTool(BaseTool):
     """Tool for searching artifact content using regex patterns."""
@@ -365,6 +514,31 @@ class GrepArtifactsTool(BaseTool):
             raise ValueError("query is required")
 
         results = ctx.client.disks.artifacts.grep_artifacts(
+            ctx.disk_id,
+            query=query,
+            limit=limit,
+        )
+
+        if not results:
+            return f"No matches found for pattern '{query}'"
+
+        matches = []
+        for artifact in results:
+            matches.append(f"{artifact.path}{artifact.filename}")
+
+        return f"Found {len(matches)} file(s) matching '{query}':\n" + "\n".join(
+            matches
+        )
+
+    async def async_execute(self, ctx: AsyncDiskContext, llm_arguments: dict) -> str:
+        """Search artifact content using regex pattern (async)."""
+        query = llm_arguments.get("query")
+        limit = llm_arguments.get("limit", 100)
+
+        if not query:
+            raise ValueError("query is required")
+
+        results = await ctx.client.disks.artifacts.grep_artifacts(
             ctx.disk_id,
             query=query,
             limit=limit,
@@ -435,12 +609,42 @@ class GlobArtifactsTool(BaseTool):
             matches
         )
 
+    async def async_execute(self, ctx: AsyncDiskContext, llm_arguments: dict) -> str:
+        """Search artifact paths using glob pattern (async)."""
+        query = llm_arguments.get("query")
+        limit = llm_arguments.get("limit", 100)
+
+        if not query:
+            raise ValueError("query is required")
+
+        results = await ctx.client.disks.artifacts.glob_artifacts(
+            ctx.disk_id,
+            query=query,
+            limit=limit,
+        )
+
+        if not results:
+            return f"No files found matching pattern '{query}'"
+
+        matches = []
+        for artifact in results:
+            matches.append(f"{artifact.path}{artifact.filename}")
+
+        return f"Found {len(matches)} file(s) matching '{query}':\n" + "\n".join(
+            matches
+        )
+
 
 class DiskToolPool(BaseToolPool):
     """Tool pool for disk operations on Acontext disks."""
 
     def format_context(self, client: AcontextClient, disk_id: str) -> DiskContext:
         return DiskContext(client=client, disk_id=disk_id)
+
+    async def async_format_context(
+        self, client: AcontextAsyncClient, disk_id: str
+    ) -> AsyncDiskContext:
+        return AsyncDiskContext(client=client, disk_id=disk_id)
 
 
 DISK_TOOLS = DiskToolPool()

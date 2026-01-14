@@ -33,6 +33,9 @@ class BaseTool(BaseConverter):
     def execute(self, ctx: BaseContext, llm_arguments: dict) -> str:
         raise NotImplementedError
 
+    async def async_execute(self, ctx: BaseContext, llm_arguments: dict) -> str:
+        raise NotImplementedError
+
     def to_openai_tool_schema(self) -> dict:
         return {
             "type": "function",
@@ -90,6 +93,13 @@ class BaseToolPool(BaseConverter):
         r = tool.execute(ctx, llm_arguments)
         return r.strip()
 
+    async def async_execute_tool(
+        self, ctx: BaseContext, tool_name: str, llm_arguments: dict
+    ) -> str:
+        tool = self.tools[tool_name]
+        r = await tool.async_execute(ctx, llm_arguments)
+        return r.strip()
+
     def tool_exists(self, tool_name: str) -> bool:
         return tool_name in self.tools
 
@@ -103,4 +113,7 @@ class BaseToolPool(BaseConverter):
         return [tool.to_gemini_tool_schema() for tool in self.tools.values()]
 
     def format_context(self, *args, **kwargs) -> BaseContext:
+        raise NotImplementedError
+
+    async def async_format_context(self, *args, **kwargs) -> BaseContext:
         raise NotImplementedError

@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 
 from .base import BaseContext, BaseTool, BaseToolPool
 from ..client import AcontextClient
+from ..async_client import AcontextAsyncClient
 from ..types.skill import Skill
 
 
@@ -33,6 +34,64 @@ class SkillContext(BaseContext):
         skills: dict[str, Skill] = {}
         for skill_id in skill_ids:
             skill = client.skills.get(skill_id)
+            if skill.name in skills:
+                raise ValueError(
+                    f"Duplicate skill name '{skill.name}' found. "
+                    f"Existing ID: {skills[skill.name].id}, New ID: {skill.id}"
+                )
+            skills[skill.name] = skill
+        return cls(client=client, skills=skills)
+
+    def get_skill(self, skill_name: str) -> Skill:
+        """Get a skill by name from the preloaded skills.
+
+        Args:
+            skill_name: The name of the skill.
+
+        Returns:
+            The Skill object.
+
+        Raises:
+            ValueError: If the skill is not found in the context.
+        """
+        if skill_name not in self.skills:
+            available = ", ".join(self.skills.keys()) if self.skills else "[none]"
+            raise ValueError(
+                f"Skill '{skill_name}' not found in context. Available skills: {available}"
+            )
+        return self.skills[skill_name]
+
+    def list_skill_names(self) -> list[str]:
+        """Return list of available skill names in this context."""
+        return list(self.skills.keys())
+
+
+@dataclass
+class AsyncSkillContext(BaseContext):
+    """Async context for skill tools with preloaded skill name mapping."""
+
+    client: AcontextAsyncClient
+    skills: dict[str, Skill] = field(default_factory=dict)
+
+    @classmethod
+    async def create(
+        cls, client: AcontextAsyncClient, skill_ids: list[str]
+    ) -> "AsyncSkillContext":
+        """Create an AsyncSkillContext by preloading skills from a list of skill IDs.
+
+        Args:
+            client: The Acontext async client instance.
+            skill_ids: List of skill UUIDs to preload.
+
+        Returns:
+            AsyncSkillContext with preloaded skills mapped by name.
+
+        Raises:
+            ValueError: If duplicate skill names are found.
+        """
+        skills: dict[str, Skill] = {}
+        for skill_id in skill_ids:
+            skill = await client.skills.get(skill_id)
             if skill.name in skills:
                 raise ValueError(
                     f"Duplicate skill name '{skill.name}' found. "
@@ -94,6 +153,35 @@ class GetSkillTool(BaseTool):
 
     def execute(self, ctx: SkillContext, llm_arguments: dict) -> str:
         """Get a skill by name."""
+        skill_name = llm_arguments.get("skill_name")
+
+        if not skill_name:
+            raise ValueError("skill_name is required")
+
+        skill = ctx.get_skill(skill_name)
+
+        file_count = len(skill.file_index)
+
+        # Format all files with path and MIME type
+        if skill.file_index:
+            file_list = "\n".join(
+                [
+                    f"  - {file_info.path} ({file_info.mime})"
+                    for file_info in skill.file_index
+                ]
+            )
+        else:
+            file_list = "  [NO FILES]"
+
+        return (
+            f"Skill: {skill.name} (ID: {skill.id})\n"
+            f"Description: {skill.description}\n"
+            f"Files: {file_count} file(s)\n"
+            f"{file_list}"
+        )
+
+    async def async_execute(self, ctx: AsyncSkillContext, llm_arguments: dict) -> str:
+        """Get a skill by name (async)."""
         skill_name = llm_arguments.get("skill_name")
 
         if not skill_name:
@@ -197,6 +285,45 @@ class GetSkillFileTool(BaseTool):
 
         return "\n".join(output_parts)
 
+    async def async_execute(self, ctx: AsyncSkillContext, llm_arguments: dict) -> str:
+        """Get a skill file (async)."""
+        skill_name = llm_arguments.get("skill_name")
+        file_path = llm_arguments.get("file_path")
+        expire = llm_arguments.get("expire")
+
+        if not skill_name:
+            raise ValueError("skill_name is required")
+        if not file_path:
+            raise ValueError("file_path is required")
+
+        skill = ctx.get_skill(skill_name)
+
+        result = await ctx.client.skills.get_file(
+            skill_id=skill.id,
+            file_path=file_path,
+            expire=expire,
+        )
+
+        output_parts = [
+            f"File '{result.path}' (MIME: {result.mime}) from skill '{skill_name}':"
+        ]
+
+        if result.content:
+            output_parts.append(f"\nContent (type: {result.content.type}):")
+            output_parts.append(result.content.raw)
+
+        if result.url:
+            expire_seconds = expire if expire is not None else 900
+            output_parts.append(
+                f"\nDownload URL (expires in {expire_seconds} seconds):"
+            )
+            output_parts.append(result.url)
+
+        if not result.content and not result.url:
+            return f"File '{result.path}' retrieved but no content or URL returned."
+
+        return "\n".join(output_parts)
+
 
 class ListSkillsTool(BaseTool):
     """Tool for listing available skills in the context."""
@@ -228,6 +355,17 @@ class ListSkillsTool(BaseTool):
 
         return f"Available skills ({len(ctx.skills)}):\n" + "\n".join(skill_list)
 
+    async def async_execute(self, ctx: AsyncSkillContext, llm_arguments: dict) -> str:
+        """List all available skills (async)."""
+        if not ctx.skills:
+            return "No skills available in the current context."
+
+        skill_list = []
+        for skill_name, skill in ctx.skills.items():
+            skill_list.append(f"- {skill_name}: {skill.description}")
+
+        return f"Available skills ({len(ctx.skills)}):\n" + "\n".join(skill_list)
+
 
 class SkillToolPool(BaseToolPool):
     """Tool pool for skill operations on Acontext skills."""
@@ -245,6 +383,20 @@ class SkillToolPool(BaseToolPool):
             SkillContext with preloaded skills mapped by name.
         """
         return SkillContext.create(client=client, skill_ids=skill_ids)
+
+    async def async_format_context(
+        self, client: AcontextAsyncClient, skill_ids: list[str]
+    ) -> AsyncSkillContext:
+        """Create an AsyncSkillContext by preloading skills from a list of skill IDs.
+
+        Args:
+            client: The Acontext async client instance.
+            skill_ids: List of skill UUIDs to preload.
+
+        Returns:
+            AsyncSkillContext with preloaded skills mapped by name.
+        """
+        return await AsyncSkillContext.create(client=client, skill_ids=skill_ids)
 
 
 SKILL_TOOLS = SkillToolPool()
