@@ -3,73 +3,77 @@ title: Quickstart
 description: "Install Acontext SDK and run a demo script"
 ---
 
-## Start Acontext Server
+Get up and running with Acontext in under 5 minutes. This guide walks you through setting up the server, installing the SDK, and storing your first messages.
 
-### Use Hosted Acontext
-Go to [Acontext Dashboard](https://dash.acontext.io) and sign up for a free account. 
-The onboarding process will guide you to get an API key.
+<Steps>
+<Step title="Start Acontext server">
 
-### Use Self-hosted Acontext
-Refer to [this doc](/local) to start acontext server in 2 commands.
-It will launch Acontext API and Dashboard on your local machine:
-- Acontext API Base URL: http://localhost:8029/api/v1
-- Acontext Dashboard: http://localhost:3000/
+Choose between hosted or self-hosted Acontext:
+
+<Tabs>
+<Tab title="Hosted (Recommended)">
+Go to [Acontext Dashboard](https://dash.acontext.io) and sign up for a free account. The onboarding process will guide you to get an API key.
+
+Set your API key as an environment variable:
+
+```bash
+export ACONTEXT_API_KEY="your-api-key"
+```
+</Tab>
+
+<Tab title="Self-hosted">
+Refer to [local deployment](/local) to start Acontext server in 2 commands. This launches:
+- **API**: http://localhost:8029/api/v1
+- **Dashboard**: http://localhost:3000/
 
 The default API key is `sk-ac-your-root-api-bearer-token`.
+</Tab>
+</Tabs>
 
+</Step>
 
-## Install SDK
+<Step title="Install the SDK">
 
 <Tabs>
 <Tab title="Python">
-
-### Requirements
-
-- Python 3.10 or newer
-- pip (Python package installer)
-
-### Install via pip
-
 ```bash
 pip install acontext
 ```
+
+<Info>
+Requires Python 3.10 or newer.
+</Info>
 </Tab>
 
 <Tab title="TypeScript/JavaScript">
-
-### Requirements
-
-- Node.js 16.x or newer
-- npm, yarn, or pnpm package manager
-
-<Tabs>
-<Tab title="npm">
-```bash
+<CodeGroup>
+```bash npm
 npm install @acontext/acontext
 ```
-</Tab>
-<Tab title="yarn">
-```bash
+
+```bash yarn
 yarn add @acontext/acontext
 ```
-</Tab>
-<Tab title="pnpm">
-```bash
+
+```bash pnpm
 pnpm add @acontext/acontext
 ```
+</CodeGroup>
+
+<Info>
+Requires Node.js 16.x or newer.
+</Info>
 </Tab>
 </Tabs>
-</Tab>
-</Tabs>
 
-## Quick Start
+</Step>
 
-After installation, verify your setup with a quick connection test:
+<Step title="Verify your setup">
 
-<Tabs>
-<Tab title="Python">
+Run this script to test your connection and store your first messages:
 
-```python
+<CodeGroup>
+```python Python
 import os
 from acontext import AcontextClient
 
@@ -87,6 +91,8 @@ print(client.ping())
 
 # Create a session (optionally associate with a user)
 session = client.sessions.create(user="user@example.com")
+
+# Store messages
 client.sessions.store_message(
     session_id=session.id,
     blob={
@@ -94,7 +100,7 @@ client.sessions.store_message(
         "content": """Here is my plan:
 1. Use Next.js for the frontend
 2. Use Supabase for the database
-3. deploy to Cloudflare Pages
+3. Deploy to Cloudflare Pages
 """,
     },
 )
@@ -106,18 +112,13 @@ client.sessions.store_message(
     },
 )
 
-
+# Retrieve messages
 messages = client.sessions.get_messages(session_id=session.id)
 print(messages.items)
 ```
 
-</Tab>
-
-<Tab title="TypeScript">
-
-```typescript
-
-import { AcontextClient } from "@acontext/acontext";
+```typescript TypeScript
+import { AcontextClient } from '@acontext/acontext';
 
 const client = new AcontextClient({
     apiKey: process.env.ACONTEXT_API_KEY,
@@ -134,34 +135,36 @@ async function main() {
 
     // Create a session (optionally associate with a user)
     const session = await client.sessions.create({ user: 'user@example.com' });
+
+    // Store messages
     await client.sessions.storeMessage(session.id, {
-        role: "assistant",
+        role: 'assistant',
         content: `Here is my plan:
 1. Use Next.js for the frontend
 2. Use Supabase for the database
-3. deploy to Cloudflare Pages
+3. Deploy to Cloudflare Pages
 `,
     });
     await client.sessions.storeMessage(session.id, {
-        role: "user",
-        content: "Confirm, go ahead. Use tailwind for frontend styling.",
+        role: 'user',
+        content: 'Confirm, go ahead. Use tailwind for frontend styling.',
     });
 
+    // Retrieve messages
     const messages = await client.sessions.getMessages(session.id);
     console.log(messages.items);
 }
 
 main();
-
-
 ```
-
-</Tab>
-</Tabs>
+</CodeGroup>
 
 <Check>
-If you see the success message, you're ready to start using Acontext!
+If you see the success message and your stored messages, you're ready to start using Acontext!
 </Check>
+
+</Step>
+</Steps>
 
 ## Troubleshooting
 
@@ -192,7 +195,7 @@ If you see the success message, you're ready to start using Acontext!
 </Accordion>
 </AccordionGroup>
 
-## Next Steps
+## Next steps
 
 <CardGroup cols={2}>
 
@@ -201,8 +204,7 @@ Create and manage sessions for organizing your conversations
 </Card>
 
 <Card title="Context Engineering" icon="gear" href="/engineering/editing">
-Do context engineering for you.
-Build a compact context for agents in one api call.
+Build a compact context for agents in one API call
 </Card>
 
 <Card title="Disk Storage" icon="database" href="/store/disk">
@@ -214,4 +216,3 @@ Explore the complete API documentation
 </Card>
 
 </CardGroup>
-

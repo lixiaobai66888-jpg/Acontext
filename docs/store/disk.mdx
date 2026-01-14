@@ -268,6 +268,89 @@ Use this to browse your file structure and discover what's stored in each direct
 </Check>
 </Step>
 
+<Step title="Search file contents with grep">
+Search for text patterns within file contents using regex. This only searches text-based files (code, markdown, JSON, CSV, etc.).
+
+<CodeGroup>
+```python Python
+# Search for files containing "authentication" in content
+results = client.disks.artifacts.grep_artifacts(
+    disk.id,
+    query="authentication",
+    limit=50
+)
+
+print(f"Found {len(results)} file(s) matching pattern:")
+for artifact in results:
+    print(f"  - {artifact.path}{artifact.filename}")
+```
+
+```typescript TypeScript
+// Search for files containing "authentication" in content
+const results = await client.disks.artifacts.grepArtifacts(disk.id, {
+    query: "authentication",
+    limit: 50
+});
+
+console.log(`Found ${results.length} file(s) matching pattern:`);
+results.forEach(artifact => {
+    console.log(`  - ${artifact.path}${artifact.filename}`);
+});
+```
+</CodeGroup>
+
+<Tip>
+Use regex patterns like `"Goals.*"` to find sections, `"#.*Plan"` to find markdown headers, or `"TODO.*"` to find TODO comments. Remember: in regex, `.*` means "any characters" while `*` alone means "zero or more of the preceding character".
+</Tip>
+</Step>
+
+<Step title="Find files with glob patterns">
+Find files by path pattern using glob syntax. Use `*` for any characters, `?` for single character, `**` for recursive directories.
+
+<CodeGroup>
+```python Python
+# Find all markdown files
+results = client.disks.artifacts.glob_artifacts(
+    disk.id,
+    query="**/*.md",
+    limit=100
+)
+
+print(f"Found {len(results)} markdown file(s):")
+for artifact in results:
+    print(f"  - {artifact.path}{artifact.filename}")
+
+# Find files in documents/2024 folder
+docs = client.disks.artifacts.glob_artifacts(
+    disk.id,
+    query="/documents/2024/*"
+)
+```
+
+```typescript TypeScript
+// Find all markdown files
+const results = await client.disks.artifacts.globArtifacts(disk.id, {
+    query: "**/*.md",
+    limit: 100
+});
+
+console.log(`Found ${results.length} markdown file(s):`);
+results.forEach(artifact => {
+    console.log(`  - ${artifact.path}${artifact.filename}`);
+});
+
+// Find files in documents/2024 folder
+const docs = await client.disks.artifacts.globArtifacts(disk.id, {
+    query: "/documents/2024/*"
+});
+```
+</CodeGroup>
+
+<Info>
+Glob patterns are perfect for discovering files by extension or location without knowing exact filenames.
+</Info>
+</Step>
+
 <Step title="Update file metadata">
 Modify an artifact's metadata without re-uploading the file.
 

@@ -7,13 +7,15 @@ Acontext provides pre-built filesystem tools that allow LLMs to read, write, and
 
 ## Available Tools
 
-The SDK includes five disk operation tools:
+The SDK includes seven disk operation tools:
 
 - **`write_file`** - Create or overwrite text files
 - **`read_file`** - Read file contents with optional line offset and limit
 - **`replace_string`** - Find and replace text in files  
 - **`list_artifacts`** - List files and directories in a path
 - **`download_file`** - Get a public URL to download a file
+- **`grep_artifacts`** - Search file contents using regex patterns
+- **`glob_artifacts`** - Find files by path pattern using glob syntax
 
 <Tip>
 These tools handle path normalization automatically and support nested directory structures like `/notes/`, `/documents/2024/`, etc.
@@ -311,6 +313,42 @@ Get a public presigned URL to download a file.
 - `expire` (optional) - URL expiration time in seconds (defaults to `3600`)
 
 **Returns:** Presigned public URL for downloading the file
+
+### grep_artifacts
+
+Search for text patterns within file contents using **regex**. Only searches text-based files (code, markdown, JSON, CSV, etc.).
+
+**Parameters:**
+- `query` (required) - Regex pattern to search for (e.g., `"TODO.*"`, `"function.*calculate"`, `"import.*pandas"`)
+- `limit` (optional) - Maximum number of results to return (defaults to `100`)
+
+**Returns:** List of files matching the pattern
+
+<Warning>
+This uses **regex syntax**, not glob. In regex:
+- `.*` means "any characters" (zero or more)
+- `*` alone means "zero or more of the preceding character"
+
+For example, `"test*"` matches "tes", "test", "testt" — NOT "test-file". Use `"test.*"` to match "test-file".
+</Warning>
+
+<Tip>
+Common patterns: `"TODO.*"` (TODO comments), `"#.*Summary"` (markdown headers), `"error"` (case-sensitive match), `"(?i)error"` (case-insensitive).
+</Tip>
+
+### glob_artifacts
+
+Find files by **path pattern** using glob syntax. Use `*` for any characters, `?` for single character, `**` for recursive directories.
+
+**Parameters:**
+- `query` (required) - Glob pattern (e.g., `"**/*.md"` for all markdown files, `"*.txt"` for text files in root, `"/docs/**/*.md"` for markdown in docs)
+- `limit` (optional) - Maximum number of results to return (defaults to `100`)
+
+**Returns:** List of files matching the glob pattern
+
+<Tip>
+Use `glob_artifacts` to find files by extension or location, perfect for discovering files without knowing exact names.
+</Tip>
 
 <Warning>
 All file operations are scoped to the specific disk. Ensure you create and configure the disk context correctly before executing tools.
