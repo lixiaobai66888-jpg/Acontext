@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, type ReactElement } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart"
+import { ChartContainer, ChartTooltip, ChartTooltipContent, type CustomTooltipProps } from "@/components/ui/chart"
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Rectangle } from "recharts"
 import { useTranslations } from "next-intl"
 import {
@@ -290,8 +290,9 @@ export default function DashboardPage() {
                   tickFormatter={(value) => `${value}%`}
                 />
                 <ChartTooltip
-                  content={
+                  content={(props: CustomTooltipProps) => (
                     <ChartTooltipContent
+                      {...props}
                       formatter={(value) => {
                         const numericValue = Array.isArray(value)
                           ? Number(value[0])
@@ -304,7 +305,7 @@ export default function DashboardPage() {
                         return `${numericValue.toFixed(1)}%`
                       }}
                     />
-                  }
+                  )}
                 />
                 <Line
                   type="monotone"
@@ -340,7 +341,13 @@ export default function DashboardPage() {
                   height={60}
                 />
                 <YAxis width={50} />
-                <ChartTooltip content={<ChartTooltipContent />} />
+                <ChartTooltip
+                  content={(props: CustomTooltipProps) => (
+                    <ChartTooltipContent
+                      {...props}
+                    />
+                  )}
+                />
                 <Bar
                   dataKey="completed"
                   stackId="a"
@@ -395,7 +402,13 @@ export default function DashboardPage() {
                   height={60}
                 />
                 <YAxis width={50} />
-                <ChartTooltip content={<ChartTooltipContent />} />
+                <ChartTooltip
+                  content={(props: CustomTooltipProps) => (
+                    <ChartTooltipContent
+                      {...props}
+                    />
+                  )}
+                />
                 <Bar
                   dataKey="avgMessageTurns"
                   fill="#6366f1"
@@ -428,7 +441,13 @@ export default function DashboardPage() {
                   height={60}
                 />
                 <YAxis width={50} />
-                <ChartTooltip content={<ChartTooltipContent />} />
+                <ChartTooltip
+                  content={(props: CustomTooltipProps) => (
+                    <ChartTooltipContent
+                      {...props}
+                    />
+                  )}
+                />
                 <Bar
                   dataKey="avgTasks"
                   fill="#f59e0b"
@@ -461,7 +480,13 @@ export default function DashboardPage() {
                   height={60}
                 />
                 <YAxis width={50} />
-                <ChartTooltip content={<ChartTooltipContent />} />
+                <ChartTooltip
+                  content={(props: CustomTooltipProps) => (
+                    <ChartTooltipContent
+                      {...props}
+                    />
+                  )}
+                />
                 <Bar
                   dataKey="avgTurns"
                   fill="#6366f1"
@@ -495,8 +520,9 @@ export default function DashboardPage() {
                 />
                 <YAxis width={50} />
                 <ChartTooltip
-                  content={
+                  content={(props: CustomTooltipProps) => (
                     <ChartTooltipContent
+                      {...props}
                       formatter={(value) => {
                         const numericValue = Array.isArray(value)
                           ? Number(value[0])
@@ -509,7 +535,7 @@ export default function DashboardPage() {
                         return `${numericValue.toFixed(2)} KB`
                       }}
                     />
-                  }
+                  )}
                 />
                 <Bar
                   dataKey="usage"
@@ -546,7 +572,13 @@ export default function DashboardPage() {
                   height={60}
                 />
                 <YAxis width={50} />
-                <ChartTooltip content={<ChartTooltipContent />} />
+                <ChartTooltip
+                  content={(props: CustomTooltipProps) => (
+                    <ChartTooltipContent
+                      {...props}
+                    />
+                  )}
+                />
                 <Bar
                   dataKey="count"
                   fill="#8b5cf6"
@@ -579,7 +611,13 @@ export default function DashboardPage() {
                   height={60}
                 />
                 <YAxis width={50} />
-                <ChartTooltip content={<ChartTooltipContent />} />
+                <ChartTooltip
+                  content={(props: CustomTooltipProps) => (
+                    <ChartTooltipContent
+                      {...props}
+                    />
+                  )}
+                />
                 <Bar
                   dataKey="count"
                   fill="#ec4899"
@@ -612,7 +650,13 @@ export default function DashboardPage() {
                   height={60}
                 />
                 <YAxis width={50} />
-                <ChartTooltip content={<ChartTooltipContent />} />
+                <ChartTooltip
+                  content={(props: CustomTooltipProps) => (
+                    <ChartTooltipContent
+                      {...props}
+                    />
+                  )}
+                />
                 <Bar
                   dataKey="count"
                   fill="#14b8a6"
