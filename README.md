@@ -285,20 +285,27 @@ for tc in response.choices[0].message.tool_calls:
 
 #### Sandbox with Skills
 
-> [Tool Docs](https://docs.acontext.io/tool/skill_tools) | [SDK Docs](https://docs.acontext.io/store/skill)
+> [Tool Docs](https://docs.acontext.io/tool/bash_tools#mounting-skills-in-sandbox) | [SDK Docs](https://docs.acontext.io/store/skill)
 
-Mount reusable Agent Skills into sandbox at `/skills/{name}/`.
+Mount reusable Agent Skills into sandbox at `/skills/{name}/`. [Download Anthropic's web artifact skill](https://github.com/memodb-io/Acontext-Examples/raw/refs/heads/main/assets/web-artifacts-builder.zip).
 
 <details>
 <summary>Code Example</summary>
 
 ```python
+from acontext import FileUpload
+
+# Upload a skill ZIP (e.g., web-artifacts-builder.zip)
+with open("web-artifacts-builder.zip", "rb") as f:
+    skill = client.skills.create(file=FileUpload(filename="web-artifacts-builder.zip", content=f.read()))
+
+# Mount into sandbox
 ctx = SANDBOX_TOOLS.format_context(
     client, sandbox.sandbox_id, disk.id,
-    mount_skills=["skill-uuid"]  # Skills available at /skills/{name}/
+    mount_skills=[skill.id]  # Available at /skills/{skill.name}/
 )
 
-# tool prompt will contain the skill instructions
+# Context prompt includes skill instructions
 print(ctx.get_context_prompt())
 ```
 
