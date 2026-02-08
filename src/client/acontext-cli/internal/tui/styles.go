@@ -7,16 +7,18 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Color palette - consistent with server.go
+// Color palette - adaptive for both light and dark terminal backgrounds.
+// Dark values are from the Dracula theme; Light values are higher-contrast
+// counterparts chosen for readability on white/light backgrounds.
 var (
-	ColorPrimary   = lipgloss.Color("#FF79C6") // Pink
-	ColorSecondary = lipgloss.Color("#8BE9FD") // Cyan
-	ColorSuccess   = lipgloss.Color("#50FA7B") // Green
-	ColorError     = lipgloss.Color("#FF5555") // Red
-	ColorWarning   = lipgloss.Color("#FFB86C") // Orange
-	ColorMuted     = lipgloss.Color("#6272A4") // Gray
-	ColorWhite     = lipgloss.Color("#F8F8F2") // White
-	ColorPurple    = lipgloss.Color("#BD93F9") // Purple
+	ColorPrimary   = lipgloss.AdaptiveColor{Light: "#D6336C", Dark: "#FF79C6"} // Pink
+	ColorSecondary = lipgloss.AdaptiveColor{Light: "#0E7490", Dark: "#8BE9FD"} // Cyan
+	ColorSuccess   = lipgloss.AdaptiveColor{Light: "#0F7B3F", Dark: "#50FA7B"} // Green
+	ColorError     = lipgloss.AdaptiveColor{Light: "#CC3333", Dark: "#FF5555"} // Red
+	ColorWarning   = lipgloss.AdaptiveColor{Light: "#C2590A", Dark: "#FFB86C"} // Orange
+	ColorMuted     = lipgloss.AdaptiveColor{Light: "#64748B", Dark: "#6272A4"} // Gray
+	ColorWhite     = lipgloss.AdaptiveColor{Light: "#282A36", Dark: "#F8F8F2"} // Text
+	ColorPurple    = lipgloss.AdaptiveColor{Light: "#7C3AED", Dark: "#BD93F9"} // Purple
 )
 
 // Predefined styles
